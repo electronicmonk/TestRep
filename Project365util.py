@@ -1,0 +1,561 @@
+import os
+import datetime
+import exif
+from PIL import Image, ImageOps
+import requests
+import base64
+from typing import Optional
+import shutil
+from datetime import date
+from pathlib import Path
+from openpyxl import load_workbook
+import re  # Used for advanced regex parsing
+import time
+import platform
+import subprocess
+
+
+def make_square(path, border_color=(0, 0, 0)):
+    """
+    Adds borders to images to make them square and saves them as JPEGs.
+
+    :param path: full path to image.
+    :param border_color: Tuple (R, G, B) for the border color.
+    """
+    try:
+        with Image.open(path) as img:
+            # Convert to RGB to ensure JPEG compatibility (handles RGBA/PNG)
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+
+            width, height = img.size
+
+            if width == height:
+                # Already square, but we still save with prefix as requested
+                new_img = img
+            elif width > height:
+                # Landscape: add borders to top and bottom
+                diff = width - height
+                padding = (0, diff // 2, 0, diff - (diff // 2))
+                new_img = ImageOps.expand(img, padding, fill=border_color)
+            else:
+                # Portrait: add borders to left and right
+                diff = height - width
+                padding = (diff // 2, 0, diff - (diff // 2), 0)
+                new_img = ImageOps.expand(img, padding, fill=border_color)
+
+            # Construct new filename
+            directory = os.path.dirname(path)
+            filename = os.path.basename(path)
+            name_wo_ext = os.path.splitext(filename)[0]
+            new_filename = f"ig_{name_wo_ext}.jpg"
+            save_path = os.path.join(directory, new_filename)
+
+            # Save as JPEG
+            new_img.save(save_path, "JPEG", quality=95)
+            print(f"Processed: {new_filename}")
+            return new_filename
+    except Exception as e:
+        print(f"Error processing {path}: {e}")
+
+
+def get_photo_details(image_path):
+    try:
+        with open(image_path, 'rb') as img_file:
+            img = exif.Image(img_file)
+
+        if not img.has_exif:
+            return "No EXIF data found."
+
+        # Basic Details
+        camera = img.get("model", "Unknown Camera")
+        lens = img.get("lens_model", "Unknown Lens")
+        focal_length = img.get("focal_length", 0)
+        date_taken = img.get("datetime_original", "Unknown Date")
+
+        # Calculate Effective Focal Length
+        # 1. Try to get it directly from the EXIF (35mm equivalent)
+        effective_focal = img.get("focal_length_in_35mm_film")
+        # Common Crop Factors (Add your specific camera if needed)
+        crop_factors = {
+            "Canon EOS 5D Mark IV": 1.0,  # Full Frame
+            "ILCE - 7M3": 1.0,  # Full Frame
+            "Canon EOS 40D": 1.6,
+            "EOS 7D": 1.6,
+            "X-T2": 1.5,
+            "X-T3": 1.5,
+            "X-T4": 1.5,
+        }
+        # 2. Manual Fallback if the tag is missing
+        if not effective_focal:
+            print(f"Couldn't find effective focal length for camera {camera}")
+            print("Trying to use crop factor fallback...")
+            if camera in crop_factors.keys():
+                print(crop_factors.keys())
+                print(f"Found camera {camera} in fallback list, using it")
+                factor = crop_factors.get(camera, 1.0)  # Default to 1.0 (Full Frame)
+            else:
+                print(f"Couldn't find fallback, for {camera}, defaulting to 1.0")
+                factor = 1.0
+            effective_focal = focal_length * factor
+        datetime_now = datetime.datetime.now()
+        now_date = str(datetime_now).split(" ")[0]
+        now_time = str(datetime_now).split(" ")[1]
+        day_of_week = datetime_now.strftime("%a")
+
+        exif_result = {
+            "Camera": camera,
+            "Lens": lens,
+            "FL": f"{focal_length}",
+            "EFL": f"{effective_focal}",
+            "Genre": " ",  # Place holder
+            "Date Taken": date_taken[0:date_taken.find(" ")].replace(":", "-"),
+            # Replace colons for better filename compatibility
+            "Date Posted": now_date,
+            "Day Of Week": day_of_week,
+            "Time Posted": now_time.split(".")[0],  # removing microseconds
+            "Country": " ",  # Place holder
+            "Path": image_path
+        }
+        print(exif_result)
+        return exif_result
+    except Exception as e:
+        print(f"Error processing {image_path}: {e}")
+
+
+# --- Genre classification code
+# --- Configuration ---
+OLLAMA_API_URL = "http://localhost:11434/api/generate"
+MODEL_NAME = "gemma4"
+
+
+def encode_image_to_base64(image_path: str) -> str | None:
+    """Reads a local image file and encodes it into a Base64 string."""
+    if not os.path.exists(image_path):
+        print(f"Error: Image file not found at {image_path}")
+        return None
+
+    try:
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
+    except Exception as e:
+        print(f"Error encoding image {image_path}: {e}")
+        return None
+
+
+def generic_image_request(image_path: str, model: str, prompt_text: str) -> Optional[str]:
+    """
+    Sends an image to the local Ollama model with a custom prompt and returns the raw response.
+
+    Args:
+        image_path (str): The local path to the image file.
+        model (str): The name of the Ollama model to use.
+        prompt_text (str): The custom prompt to guide the model's response.
+
+    Returns:
+        Optional[str]: The raw response from the model, or None if an error occurs.
+    """
+    start_time = time.perf_counter()
+    base64_image = encode_image_to_base64(image_path)
+    if not base64_image:
+        return None
+
+    payload = {
+        "model": model,
+        "prompt": prompt_text,
+        "stream": False,  # We wait for the full response
+        "images": [base64_image],
+        "options": {
+            "temperature": 0.1  # Keep temperature low for factual extraction
+        }
+    }
+
+    print(f"\n🧠 Sending image {image_path} to {model} via Ollama with custom prompt...")
+    print(f"Prompt:\n{prompt_text}\n")
+
+    try:
+        response = requests.post(OLLAMA_API_URL, json=payload)
+        response.raise_for_status()
+
+        data = response.json()
+        raw_response = data.get("response", "")
+
+        if not raw_response:
+            print("❌ Error: The model returned an empty response.")
+            return None
+        end_time = time.perf_counter()
+        print(f"The \"thinking\" operation took {end_time - start_time:4f} seconds using {model}.")
+        return raw_response.strip()
+
+    except requests.exceptions.ConnectionError:
+        print("\n🛑 CONNECTION ERROR:")
+        print("Could not connect to Ollama. Please ensure the Ollama service is running locally.")
+        return None
+    except requests.exceptions.HTTPError as e:
+        print(f"\n🛑 HTTP ERROR: Could not communicate with Ollama. Status code: {e.response.status_code}")
+        print("Ensure the model specified in the code exists and is pulled locally.")
+        return None
+    except Exception as e:
+        print(f"\n🛑 An unexpected error occurred during API processing: {e}")
+        return None
+
+
+# created by Sonnet 4.6
+def add_row_to_excel(
+        file_name: str,
+        sheet_name: str,
+        values: list,
+        row_number: int = None,
+        col_number: int = None,
+) -> dict:
+    """
+    Add a new row to an existing Excel sheet.
+
+    Args:
+        file_name:   Path to the .xlsx file.
+        sheet_name:  Name of the sheet to edit.
+        values:      List of values to write into the row.
+        row_number:  1-based row index. If None, the first empty row is used.
+        col_number:  1-based starting column index. If None, the first empty
+                     column in the target row is used.
+
+    Returns:
+        dict with keys:
+            status       – "success" or "fail"
+            message      – human-readable description
+            file_name    – absolute path of the edited file
+            sheet_name   – sheet that was modified
+            row_number   – row that was written
+            col_number   – starting column that was written
+    """
+
+    def _fail(msg):
+        return {
+            "status": "fail",
+            "message": msg,
+            "file_name": file_name,
+            "sheet_name": sheet_name,
+            "row_number": row_number,
+            "col_number": col_number,
+        }
+
+    # ── 1. Resolve the file ──────────────────────────────────────────────────
+    src = Path(file_name).resolve()
+    if not src.exists():
+        return _fail(f"File not found: {src}")
+    if not src.suffix.lower() == ".xlsx":
+        return _fail(f"File must be a .xlsx file: {src}")
+
+    # ── 2. Build backup file name ────────────────────────────────────────────
+    # Strip any trailing _YYYY-MM-DD or _YYYYMMDD already present in the stem
+    stem = src.stem
+    stem_clean = re.sub(r"_\d{4}-?\d{2}-?\d{2}$", "", stem)
+    today_str = date.today().strftime("%Y-%m-%d")
+    backup_name = f"{stem_clean}_{today_str}.xlsx"
+    backup_path = src.parent / backup_name
+
+    try:
+        shutil.copy2(src, backup_path)
+        print(f"Backup created: {backup_path}")
+    except Exception as exc:
+        return _fail(f"Could not create backup: {exc}")
+
+    # ── 3. Open workbook ─────────────────────────────────────────────────────
+    try:
+        wb = load_workbook(src)
+    except Exception as exc:
+        return _fail(f"Could not open workbook: {exc}")
+
+    if sheet_name not in wb.sheetnames:
+        return _fail(
+            f"Sheet '{sheet_name}' not found. "
+            f"Available sheets: {wb.sheetnames}"
+        )
+
+    ws = wb[sheet_name]
+
+    # ── 4. Determine row number ──────────────────────────────────────────────
+    if row_number is None:
+        # First row where every cell is empty (or one past the last used row)
+        row_number = ws.max_row + 1
+        for r in range(1, ws.max_row + 1):
+            if all(ws.cell(row=r, column=c).value is None for c in range(1, ws.max_column + 2)):
+                row_number = r
+                break
+
+    # ── 5. Determine starting column ─────────────────────────────────────────
+    if col_number is None:
+        # First column in the target row that is empty
+        col_number = 1
+        for c in range(1, ws.max_column + 2):
+            if ws.cell(row=row_number, column=c).value is None:
+                col_number = c
+                break
+
+    # ── 6. Write values ───────────────────────────────────────────────────────
+    try:
+        for offset, value in enumerate(values):
+            ws.cell(row=row_number, column=col_number + offset, value=value)
+        wb.save(src)
+    except Exception as exc:
+        return _fail(f"Could not write data: {exc}")
+
+    return {
+        "status": "success",
+        "message": (
+            f"Written {len(values)} value(s) starting at "
+            f"row {row_number}, column {col_number}."
+        ),
+        "file_name": str(src),
+        "sheet_name": sheet_name,
+        "row_number": row_number,
+        "col_number": col_number,
+    }
+
+
+def calculate_days_passed(year, month, day):
+    """
+    Calculate the days from today
+    :param year:
+    :param month:
+    :param day:
+    :return:
+    """
+    start_date = datetime.date(year, month, day)  # Create a date object for the start date
+    today = datetime.date.today()  # Get today's date
+    delta = today - start_date  # Subtract the dates to get a timedelta object
+    return delta.days  # Return only the integer number of days
+
+
+# generated using Gemini
+def reveal_in_file_manager(file_path):
+    """
+    Opens the file manager, selects the given file, and handles
+    cross-platform differences.
+    """
+    # Absolute path is required for system commands to work reliably
+    file_path = os.path.abspath(file_path)
+
+    if not os.path.exists(file_path):
+        print(f"Error: The path {file_path} does not exist.")
+        return
+
+    current_os = platform.system()
+
+    try:
+        if current_os == "Windows":
+            # /select, allows highlighting the file rather than just opening the folder
+            subprocess.run(['explorer', '/select,', file_path])
+
+        elif current_os == "Darwin":  # macOS
+            # -R (reveal) opens the parent folder and selects the file
+            subprocess.run(['open', '-R', file_path])
+
+        elif current_os == "Linux":
+            # Linux is fragmented; dbus is the most reliable way to 'highlight'
+            # otherwise, we default to opening the folder using xdg-open.
+            try:
+                subprocess.run([
+                    'dbus-send', '--session', '--dest=org.freedesktop.FileManager1',
+                    '--type=method_call', '/org/freedesktop/FileManager1',
+                    'org.freedesktop.FileManager1.ShowItems',
+                    f'array:string:"file://{file_path}"', 'string:""'
+                ], check=True)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                # Fallback: Just open the folder without selecting the file
+                subprocess.run(['xdg-open', os.path.dirname(file_path)])
+
+        else:
+            print(f"Unsupported OS: {current_os}")
+
+    except Exception as e:
+        print(f"Failed to open file manager: {e}")
+
+
+def full_upload_process_output(image_path: str, xlsx_path: str, sheet_name: str, row=None, col=None):
+    """
+
+    :param image_path:
+    :param xlsx_path:
+    :param sheet_name:
+    :param row:
+    :param col:
+    :return:
+    """
+    MODEL_NAME = "gemma4:31b-cloud"
+
+    desc_prompt = (
+        "You a professional photography critique. "
+        "Describe what you see in this image, in one paragraph. It should be no more than one short sentence. Don't use superlatives"
+    )
+
+    genre_prompt = (
+        "You are an expert photography critic and genre classifier. "
+        "Analyze the provided image and determine the primary genre of photography. "
+        "Your output must be concise, descriptive, and contain only the name of the genre (e.g., 'Portraiture', 'Landscape Photography', 'Street Photography'). "
+        "Do not provide any preamble, explanation, or filler text."
+    )
+
+    keywords_prompt = (
+        "You are an expert computer vision assistant. "
+        "Analyze this image and list every distinct, primary object you can see. "
+        "Respond ONLY with a comma-separated list of object names (e.g., dog, chair, book, window). "
+        "Do not include any preamble, explanation, or formatting outside of the comma-separated list."
+    )
+    location_prompt = (
+        "Analyse the image and determine the location. "
+        "The output should be strictly formated as country, location, site. "
+        "If any of the items cannot be determined, replace it with 'undetermined'. "
+        "If thinking time is longer than 300 seconds, output 'undetermined, undetermined, undetermined'."
+    )
+
+    if os.path.isfile(image_path):
+        exif_data = get_photo_details(image_path)
+        padded_file_name = make_square(image_path)
+        reveal_in_file_manager(image_path)
+        genre = generic_image_request(image_path, "gemma4", genre_prompt)
+        desc = generic_image_request(image_path, "gemma4", desc_prompt)
+        keywords_raw = generic_image_request(image_path, "gemma4", keywords_prompt)
+        location = generic_image_request(image_path, "gemma4:31b-cloud", location_prompt)
+
+        print(f"Padded file: {padded_file_name}")
+        if genre:
+            exif_data["Genre"] = str(genre)
+            print("Genre:")
+            print(genre)
+        else:
+            print("Genre was not determined")
+
+        if exif_data:
+            print("EXIF Data:")
+            for key, value in exif_data.items():
+                print(f"{value}", end="\t")
+            print('\n')
+        else:
+            print("EXIF data could not be extracted.")
+
+        if desc:
+            print("Description:")
+            print(desc)
+        else:
+            print("Description could not be generated.")
+        if location:
+            print(f"Location: {location}")
+        else:
+            print("Location could not be determined.")
+
+        if keywords_raw:
+            keywords_list = [k.strip() for k in keywords_raw.split(',') if k.strip()]
+            print("Keywords:")
+            for k in keywords_list:
+                print(f"{k}", end="\t")
+        else:
+            print("No keywords were found.")
+        print('\n')
+
+        if os.path.isfile(xlsx_path):
+            print(f"XLSX file {xlsx_path} found. Attempting to write data...")
+            valueslist = [
+                exif_data.get("Camera", ""),
+                exif_data.get("Lens", ""),
+                float(exif_data.get("FL", 0)),  # Get only the focal length number
+                float(exif_data.get("EFL", 0)),  # Get only the effective focal length number
+                exif_data.get("Genre", ""),
+                datetime.datetime.strptime(exif_data.get("Date Taken", ""), "%Y-%m-%d"),
+                datetime.datetime.strptime(exif_data.get("Date Posted", ""), "%Y-%m-%d"),
+                exif_data.get("Day Of Week", ""),
+                datetime.datetime.strptime(exif_data.get("Time Posted", ""), "%H:%M:%S"),
+                location,
+                image_path
+            ]
+            if desc:
+                valueslist.append(desc)
+            else:
+                valueslist.append(" ")
+            if keywords_raw:
+                for k in keywords_list:
+                    valueslist.append(k)
+            else:
+                valueslist.append(" ")
+
+            add_row_to_excel(file_name=xlsx_path,
+                             sheet_name=sheet_name,
+                             values=valueslist,
+                             row_number=row, col_number=col)
+        else:
+            print(f"Excel file {xlsx_path} not found. Data will not be saved to Excel.")
+    else:
+        print(f"Image file {image_path} not found.")
+
+
+# --- Main Execution Block ---
+if __name__ == "__main__":
+    # --- CONFIGURATION ---
+    start_time = time.perf_counter()
+    image_to_process = r"D:\pictures\2014\11\03 Tornado\devs\P1040929.jpg"
+    xlsx_file = r"G:\My Drive\Per Day 2026\One Photo per day 2026-2027.xlsx"
+    xl_sheet = "Photos"
+
+    row = calculate_days_passed(2026, 4, 11) + 2  # days since 2026-04-11 plus 2 header rows
+    update_status = full_upload_process_output(image_to_process, xlsx_file, xl_sheet, row=row)
+    print(update_status)
+    end_time = time.perf_counter()
+    print(f"The entire batch operation took {end_time - start_time:4f} seconds.")
+"""
+#--Test section
+    img_files =[
+        r"D:\pictures\2011\11\27 Eva 2011\devs\IMG_5669.jpg",
+        r"D:\pictures\2024\05\07 Ireland\Devs\IMG_2964.jpg",
+        r"D:\pictures\2021\03\27 Masada\devs\IMG_8029.jpg",
+        r"F:\Pictures\2025\10\15 Dolomites\Devs\IMT_3504.jpg",
+        r"D:\pictures\2020\06\05 Tel Aviv at night\devs\BO9A6739.jpg",
+        r"D:\pictures\2021\06\12 Phtototips Desert\devs\IMG_1962.jpg",
+        r"D:\pictures\2025\02\08 Phtototips Swing\Devs\IMT_5537.jpg",
+        r"D:\pictures\2018\06\21 Kids sunset\devs\DSC01006.jpg",
+        r"D:\pictures\2021\10\2021-10-25 Romania day 1\devs\IMG_2706.jpg",
+        r"F:\Pictures\2025\12\2025-12-19 TLV with Boris\Devs\DSC03006.jpg",
+        r"F:\Pictures\2025\08\23 Desert Night\Devs\DSC01989.jpg",
+        r"F:\Pictures\2025\08\23 Desert Night\Devs\IMT_6004.jpg",
+        r"F:\Pictures\2025\10\21 Kobarid\Devs\IMT_5177.jpg",
+        r"F:\Pictures\2025\10\14 Dolomites\Devs\IMT_3080.jpg",
+        r"F:\Pictures\2025\09\2025-09-07 Lunar Ecplise\Devs\IMT_6370.jpg",
+        r"D:\pictures\2008\08\redbullrace\select\devs\IMG_1022.jpg",
+        r"D:\pictures\2017\12\12 Prague\devs\IMG_3632.jpg",
+        r"D:\pictures\2025\2025-05-26 Tatras\Devs\IMG_6971.jpg"
+    ]
+
+
+
+    model="gemma4:31b"
+    prompt =  (
+        "You're a professional photography teacher. "
+        "Rank the following photo using four categories: composition, storytelling, aesthetics and technical quality. "
+        "Output the grade as a combined grade and each of the elements of the grade individually."
+        "Format strictly as numbers: composition, storytelling, aesthetics, technical quality, overall grade." )
+    results = []
+    start_time = time.perf_counter()
+    for e, i in enumerate(img_files):
+        print(f"Working on image {e}")
+        rawres = generic_image_request(i, model, prompt)
+        print(rawres)
+        results.append(rawres)
+    end_time = time.perf_counter()
+    for e, r in enumerate(results):
+        lst = r.split(",")
+        print(e,'\t')
+
+        for l in lst:
+            print(l, end="\t")
+        print('\n')
+
+    end_time = time.perf_counter()
+    print(f"The entire batch operation took {end_time-start_time:4f} seconds using.")
+
+"""
+
+
+
+
+
+
+
