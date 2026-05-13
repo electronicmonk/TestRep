@@ -13,6 +13,7 @@ from openpyxl import load_workbook
 import re  # Used for advanced regex parsing
 import platform
 import subprocess
+import socket
 
 config_platform = []
 
@@ -33,6 +34,32 @@ def encode_image_to_base64(image_path: str) -> str | None:
     except Exception as e:
         print(f"Error encoding image {image_path}: {e}")
         return None
+
+
+def check_llm_status(service_type, ip):
+    """
+    Checks a single IP for a specific LLM service.
+    Returns: {service_type: True/False}
+    """
+    port_map = {
+        "ollama": 11434,
+        "lm studio": 1234,
+        "llama.cpp": 8080
+    }
+
+    # Get port, default to 0 if service not found (will result in False)
+    port = port_map.get(service_type.lower().strip(), 0)
+
+    # Initialize socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(1.0)
+
+    # Perform check (0 means port is open/online)
+    is_online = sock.connect_ex((ip, port)) == 0
+
+    sock.close()
+
+    return {"service": service_type, "address": ip, "online": is_online}
 
 def generic_image_request(image_path: str, model: str, prompt_text: str):
     """

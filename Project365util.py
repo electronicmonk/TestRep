@@ -8,7 +8,10 @@ import re  # Used for advanced regex parsing
 import time
 import platform
 import subprocess
-from photoexperiment import make_square, get_photo_details, generic_image_request
+
+from urllib3.util.util import reraise
+
+from photoexperiment import make_square, get_photo_details, generic_image_request, check_llm_status
 
 # --- Genre classification code
 # --- Configuration ---
@@ -222,8 +225,9 @@ def full_upload_process_output(image_path: str, xlsx_path: str, sheet_name: str,
         "If any of the items cannot be determined, replace it with 'undetermined'. "
         "If thinking time is longer than 300 seconds, output 'undetermined, undetermined, undetermined'."
     )
-
-    if os.path.isfile(image_path):
+    _,_,llm_status = check_llm_status("ollama", "192.168.10.187")
+    file_exists = os.path.isfile(image_path)
+    if llm_status and file_exists:
         exif_data = get_photo_details(image_path)
         padded_file_name = make_square(image_path)
         reveal_in_file_manager(image_path)
@@ -296,17 +300,25 @@ def full_upload_process_output(image_path: str, xlsx_path: str, sheet_name: str,
                              sheet_name=sheet_name,
                              values=valueslist,
                              row_number=row, col_number=col)
+            return "Excel updated successfully."
         else:
             print(f"Excel file {xlsx_path} not found. Data will not be saved to Excel.")
+            return "Failed to update Excel."
     else:
-        print(f"Image file {image_path} not found.")
+        if not file_exists:
+            print(f"Image file {image_path} not found.")
+            reasons = "Image file not found "
+        if not llm_status:
+            print(f"LLM service not online.")
+            reasons += "LLM service not online."
+        return f"Update failed. Reasons: {reasons}"
 
 
 # --- Main Execution Block ---
 if __name__ == "__main__":
     # --- CONFIGURATION ---
     start_time = time.perf_counter()
-    image_to_process = r"D:\pictures\2023\2023-08-02 Hungary\Devs\DSC06185.jpg"
+    image_to_process = r"D:\pictures\2023\04\25 Moravia 2\Devs\IMG_0405.jpg"
     xlsx_file = r"G:\My Drive\Per Day 2026\One Photo per day 2026-2027.xlsx"
     xl_sheet = "Photos"
 
@@ -315,6 +327,8 @@ if __name__ == "__main__":
     print(update_status)
     end_time = time.perf_counter()
     print(f"The entire batch operation took {end_time - start_time:4f} seconds.")
+
+    #print(check_llm_status("ollama","192.168.10.187"))
 """
 #--Test section
     img_files =[
@@ -337,7 +351,6 @@ if __name__ == "__main__":
         r"D:\pictures\2017\12\12 Prague\devs\IMG_3632.jpg",
         r"D:\pictures\2025\2025-05-26 Tatras\Devs\IMG_6971.jpg"
     ]
-
 
 
     model="gemma4:31b"
