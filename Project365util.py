@@ -1,10 +1,5 @@
 import os
 import datetime
-import exif
-from PIL import Image, ImageOps
-import requests
-import base64
-from typing import Optional
 import shutil
 from datetime import date
 from pathlib import Path
@@ -13,89 +8,10 @@ import re  # Used for advanced regex parsing
 import time
 import platform
 import subprocess
-
-
-
-
-
-
-
+from photoexperiment import make_square, get_photo_details, generic_image_request
 
 # --- Genre classification code
 # --- Configuration ---
-OLLAMA_API_URL = "http://localhost:11434/api/generate"
-MODEL_NAME = "gemma4"
-
-
-def encode_image_to_base64(image_path: str) -> str | None:
-    """Reads a local image file and encodes it into a Base64 string."""
-    if not os.path.exists(image_path):
-        print(f"Error: Image file not found at {image_path}")
-        return None
-
-    try:
-        with open(image_path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode('utf-8')
-    except Exception as e:
-        print(f"Error encoding image {image_path}: {e}")
-        return None
-
-
-def generic_image_request(image_path: str, model: str, prompt_text: str) -> Optional[str]:
-    """
-    Sends an image to the local Ollama model with a custom prompt and returns the raw response.
-
-    Args:
-        image_path (str): The local path to the image file.
-        model (str): The name of the Ollama model to use.
-        prompt_text (str): The custom prompt to guide the model's response.
-
-    Returns:
-        Optional[str]: The raw response from the model, or None if an error occurs.
-    """
-    start_time = time.perf_counter()
-    base64_image = encode_image_to_base64(image_path)
-    if not base64_image:
-        return None
-
-    payload = {
-        "model": model,
-        "prompt": prompt_text,
-        "stream": False,  # We wait for the full response
-        "images": [base64_image],
-        "options": {
-            "temperature": 0.1  # Keep temperature low for factual extraction
-        }
-    }
-
-    print(f"\n🧠 Sending image {image_path} to {model} via Ollama with custom prompt...")
-    print(f"Prompt:\n{prompt_text}\n")
-
-    try:
-        response = requests.post(OLLAMA_API_URL, json=payload)
-        response.raise_for_status()
-
-        data = response.json()
-        raw_response = data.get("response", "")
-
-        if not raw_response:
-            print("❌ Error: The model returned an empty response.")
-            return None
-        end_time = time.perf_counter()
-        print(f"The \"thinking\" operation took {end_time - start_time:4f} seconds using {model}.")
-        return raw_response.strip()
-
-    except requests.exceptions.ConnectionError:
-        print("\n🛑 CONNECTION ERROR:")
-        print("Could not connect to Ollama. Please ensure the Ollama service is running locally.")
-        return None
-    except requests.exceptions.HTTPError as e:
-        print(f"\n🛑 HTTP ERROR: Could not communicate with Ollama. Status code: {e.response.status_code}")
-        print("Ensure the model specified in the code exists and is pulled locally.")
-        return None
-    except Exception as e:
-        print(f"\n🛑 An unexpected error occurred during API processing: {e}")
-        return None
 
 
 # created by Sonnet 4.6
@@ -390,7 +306,7 @@ def full_upload_process_output(image_path: str, xlsx_path: str, sheet_name: str,
 if __name__ == "__main__":
     # --- CONFIGURATION ---
     start_time = time.perf_counter()
-    image_to_process = r"D:\pictures\2014\11\03 Tornado\devs\P1040929.jpg"
+    image_to_process = r"D:\pictures\2023\2023-08-02 Hungary\Devs\DSC06185.jpg"
     xlsx_file = r"G:\My Drive\Per Day 2026\One Photo per day 2026-2027.xlsx"
     xl_sheet = "Photos"
 
