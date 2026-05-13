@@ -19,6 +19,8 @@ config_platform = []
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "gemma4"
 
+
+
 def encode_image_to_base64(image_path: str) -> str | None:
     """Reads a local image file and encodes it into a Base64 string."""
     if not os.path.exists(image_path):
