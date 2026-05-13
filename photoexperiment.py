@@ -14,6 +14,7 @@ import re  # Used for advanced regex parsing
 import platform
 import subprocess
 
+config_platform = []
 
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 MODEL_NAME = "gemma4"
