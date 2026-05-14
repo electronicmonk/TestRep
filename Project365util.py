@@ -11,7 +11,7 @@ import subprocess
 
 from urllib3.util.util import reraise
 
-from photoexperiment import make_square, get_photo_details, generic_image_request, check_llm_status
+from photoexperiment import make_square, get_photo_details, generic_image_request, check_llm_status, reveal_in_file_manager
 
 # --- Genre classification code
 # --- Configuration ---
@@ -144,49 +144,6 @@ def calculate_days_passed(year, month, day):
     return delta.days  # Return only the integer number of days
 
 
-# generated using Gemini
-def reveal_in_file_manager(file_path):
-    """
-    Opens the file manager, selects the given file, and handles
-    cross-platform differences.
-    """
-    # Absolute path is required for system commands to work reliably
-    file_path = os.path.abspath(file_path)
-
-    if not os.path.exists(file_path):
-        print(f"Error: The path {file_path} does not exist.")
-        return
-
-    current_os = platform.system()
-
-    try:
-        if current_os == "Windows":
-            # /select, allows highlighting the file rather than just opening the folder
-            subprocess.run(['explorer', '/select,', file_path])
-
-        elif current_os == "Darwin":  # macOS
-            # -R (reveal) opens the parent folder and selects the file
-            subprocess.run(['open', '-R', file_path])
-
-        elif current_os == "Linux":
-            # Linux is fragmented; dbus is the most reliable way to 'highlight'
-            # otherwise, we default to opening the folder using xdg-open.
-            try:
-                subprocess.run([
-                    'dbus-send', '--session', '--dest=org.freedesktop.FileManager1',
-                    '--type=method_call', '/org/freedesktop/FileManager1',
-                    'org.freedesktop.FileManager1.ShowItems',
-                    f'array:string:"file://{file_path}"', 'string:""'
-                ], check=True)
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                # Fallback: Just open the folder without selecting the file
-                subprocess.run(['xdg-open', os.path.dirname(file_path)])
-
-        else:
-            print(f"Unsupported OS: {current_os}")
-
-    except Exception as e:
-        print(f"Failed to open file manager: {e}")
 
 
 def full_upload_process_output(image_path: str, xlsx_path: str, sheet_name: str, row=None, col=None):
@@ -225,9 +182,10 @@ def full_upload_process_output(image_path: str, xlsx_path: str, sheet_name: str,
         "If any of the items cannot be determined, replace it with 'undetermined'. "
         "If thinking time is longer than 300 seconds, output 'undetermined, undetermined, undetermined'."
     )
-    _,_,llm_status = check_llm_status("ollama", "192.168.10.187")
-    file_exists = os.path.isfile(image_path)
-    if llm_status and file_exists:
+    llm_status = check_llm_status("ollama", "192.168.10.187")
+    img_file_exists = (os.path.isfile(image_path))
+    xlsx_file_exists = os.path.isfile(xlsx_path)
+    if llm_status["online"] and img_file_exists: #
         exif_data = get_photo_details(image_path)
         padded_file_name = make_square(image_path)
         reveal_in_file_manager(image_path)
@@ -273,6 +231,7 @@ def full_upload_process_output(image_path: str, xlsx_path: str, sheet_name: str,
 
         if os.path.isfile(xlsx_path):
             print(f"XLSX file {xlsx_path} found. Attempting to write data...")
+            # create a list to add to the Excel file
             valueslist = [
                 exif_data.get("Camera", ""),
                 exif_data.get("Lens", ""),
@@ -295,7 +254,7 @@ def full_upload_process_output(image_path: str, xlsx_path: str, sheet_name: str,
                     valueslist.append(k)
             else:
                 valueslist.append(" ")
-
+            # Update the Excel file with the new row of data
             add_row_to_excel(file_name=xlsx_path,
                              sheet_name=sheet_name,
                              values=valueslist,
@@ -305,10 +264,11 @@ def full_upload_process_output(image_path: str, xlsx_path: str, sheet_name: str,
             print(f"Excel file {xlsx_path} not found. Data will not be saved to Excel.")
             return "Failed to update Excel."
     else:
+        reasons = ""
         if not file_exists:
             print(f"Image file {image_path} not found.")
             reasons = "Image file not found "
-        if not llm_status:
+        if not llm_status["online"]:
             print(f"LLM service not online.")
             reasons += "LLM service not online."
         return f"Update failed. Reasons: {reasons}"
@@ -318,13 +278,14 @@ def full_upload_process_output(image_path: str, xlsx_path: str, sheet_name: str,
 if __name__ == "__main__":
     # --- CONFIGURATION ---
     start_time = time.perf_counter()
-    image_to_process = r"D:\pictures\2023\04\25 Moravia 2\Devs\IMG_0405.jpg"
+    image_to_process = r"D:\pictures\2022\10\13 Slovenia\Devs\IMG_8966.jpg"
     xlsx_file = r"G:\My Drive\Per Day 2026\One Photo per day 2026-2027.xlsx"
     xl_sheet = "Photos"
 
     row = calculate_days_passed(2026, 4, 11) + 2  # days since 2026-04-11 plus 2 header rows
     update_status = full_upload_process_output(image_to_process, xlsx_file, xl_sheet, row=row)
     print(update_status)
+
     end_time = time.perf_counter()
     print(f"The entire batch operation took {end_time - start_time:4f} seconds.")
 

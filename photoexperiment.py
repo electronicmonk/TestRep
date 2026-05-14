@@ -224,6 +224,51 @@ def get_photo_details(image_path):
     except Exception as e:
         print(f"Error processing {image_path}: {e}")
 
+# generated using Gemini
+def reveal_in_file_manager(file_path):
+    """
+    Opens the file manager, selects the given file, and handles
+    cross-platform differences.
+    """
+    # Absolute path is required for system commands to work reliably
+    file_path = os.path.abspath(file_path)
+
+    if not os.path.exists(file_path):
+        print(f"Error: The path {file_path} does not exist.")
+        return
+
+    current_os = platform.system()
+
+    try:
+        if current_os == "Windows":
+            # /select, allows highlighting the file rather than just opening the folder
+            subprocess.run(['explorer', '/select,', file_path])
+
+        elif current_os == "Darwin":  # macOS
+            # -R (reveal) opens the parent folder and selects the file
+            subprocess.run(['open', '-R', file_path])
+
+        elif current_os == "Linux":
+            # Linux is fragmented; dbus is the most reliable way to 'highlight'
+            # otherwise, we default to opening the folder using xdg-open.
+            try:
+                subprocess.run([
+                    'dbus-send', '--session', '--dest=org.freedesktop.FileManager1',
+                    '--type=method_call', '/org/freedesktop/FileManager1',
+                    'org.freedesktop.FileManager1.ShowItems',
+                    f'array:string:"file://{file_path}"', 'string:""'
+                ], check=True)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                # Fallback: Just open the folder without selecting the file
+                subprocess.run(['xdg-open', os.path.dirname(file_path)])
+
+        else:
+            print(f"Unsupported OS: {current_os}")
+
+    except Exception as e:
+        print(f"Failed to open file manager: {e}")
+
+
 def process_visual_prompts(
         prompts,
         images=None,
@@ -303,6 +348,8 @@ def process_visual_prompts(
     return results
 
 
+
+
 # --- Framework Usage Example ---
 
 def log_system_status():
@@ -315,6 +362,9 @@ def log_system_status():
 def on_result_found(data):
     """Example callback: runs every time a prompt is finished."""
     print(f"--- [Callback] Finished processing {data['image']} ---")
+
+
+
 
 # Usage:
 # results = process_visual_prompts(
