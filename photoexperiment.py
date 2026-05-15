@@ -18,6 +18,8 @@ import socket
 config_platform = []
 
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
+LM_Studio_API_URL = "http://localhost:1234/v1/chat/completions"
+LLAMA_CPP_API_URL = "http://localhost:8080/v1/chat/completions"
 MODEL_NAME = "gemma4"
 
 

@@ -278,7 +278,7 @@ def full_upload_process_output(image_path: str, xlsx_path: str, sheet_name: str,
 if __name__ == "__main__":
     # --- CONFIGURATION ---
     start_time = time.perf_counter()
-    image_to_process = r"D:\pictures\2022\10\13 Slovenia\Devs\IMG_8966.jpg"
+    image_to_process = r"D:\pictures\2024\08\03 TLV beach with Sharon\Devs\DSC00534.jpg"
     xlsx_file = r"G:\My Drive\Per Day 2026\One Photo per day 2026-2027.xlsx"
     xl_sheet = "Photos"
 
