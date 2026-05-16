@@ -17,7 +17,6 @@ except ImportError:
 from photoexperiment import (
     check_llm_status,
     generic_image_request,
-    generic_image_request2,
     get_photo_details,
     make_square,
     reveal_in_file_manager,
@@ -250,7 +249,7 @@ class PhotoUploadGUI:
                 # user updates their local environment/hosts or the utility function
                 # is updated to accept a URL.
                 # FOR NOW, I call the function as is.
-                res = generic_image_request2(img_path, model, prompt, url=target_url)
+                res = generic_image_request(img_path, model, prompt, url=target_url)
                 results[key] = res
                 if res:
                     self.log(f"  -> {key}: {res}")
