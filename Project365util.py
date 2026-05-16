@@ -11,137 +11,25 @@ import subprocess
 
 from urllib3.util.util import reraise
 
-from photoexperiment import make_square, get_photo_details, generic_image_request, check_llm_status, reveal_in_file_manager
+from photoexperiment import (
+    make_square,
+    get_photo_details,
+    generic_image_request,
+    check_llm_status,
+    reveal_in_file_manager,
+    calculate_days_passed,
+    add_row_to_excel
+)
 
 # --- Genre classification code
 # --- Configuration ---
 
 
 # created by Sonnet 4.6
-def add_row_to_excel(
-        file_name: str,
-        sheet_name: str,
-        values: list,
-        row_number: int = None,
-        col_number: int = None,
-) -> dict:
-    """
-    Add a new row to an existing Excel sheet.
-
-    Args:
-        file_name:   Path to the .xlsx file.
-        sheet_name:  Name of the sheet to edit.
-        values:      List of values to write into the row.
-        row_number:  1-based row index. If None, the first empty row is used.
-        col_number:  1-based starting column index. If None, the first empty
-                     column in the target row is used.
-
-    Returns:
-        dict with keys:
-            status       – "success" or "fail"
-            message      – human-readable description
-            file_name    – absolute path of the edited file
-            sheet_name   – sheet that was modified
-            row_number   – row that was written
-            col_number   – starting column that was written
-    """
-
-    def _fail(msg):
-        return {
-            "status": "fail",
-            "message": msg,
-            "file_name": file_name,
-            "sheet_name": sheet_name,
-            "row_number": row_number,
-            "col_number": col_number,
-        }
-
-    # ── 1. Resolve the file ──────────────────────────────────────────────────
-    src = Path(file_name).resolve()
-    if not src.exists():
-        return _fail(f"File not found: {src}")
-    if not src.suffix.lower() == ".xlsx":
-        return _fail(f"File must be a .xlsx file: {src}")
-
-    # ── 2. Build backup file name ────────────────────────────────────────────
-    # Strip any trailing _YYYY-MM-DD or _YYYYMMDD already present in the stem
-    stem = src.stem
-    stem_clean = re.sub(r"_\d{4}-?\d{2}-?\d{2}$", "", stem)
-    today_str = date.today().strftime("%Y-%m-%d")
-    backup_name = f"{stem_clean}_{today_str}.xlsx"
-    backup_path = src.parent / backup_name
-
-    try:
-        shutil.copy2(src, backup_path)
-        print(f"Backup created: {backup_path}")
-    except Exception as exc:
-        return _fail(f"Could not create backup: {exc}")
-
-    # ── 3. Open workbook ─────────────────────────────────────────────────────
-    try:
-        wb = load_workbook(src)
-    except Exception as exc:
-        return _fail(f"Could not open workbook: {exc}")
-
-    if sheet_name not in wb.sheetnames:
-        return _fail(
-            f"Sheet '{sheet_name}' not found. "
-            f"Available sheets: {wb.sheetnames}"
-        )
-
-    ws = wb[sheet_name]
-
-    # ── 4. Determine row number ──────────────────────────────────────────────
-    if row_number is None:
-        # First row where every cell is empty (or one past the last used row)
-        row_number = ws.max_row + 1
-        for r in range(1, ws.max_row + 1):
-            if all(ws.cell(row=r, column=c).value is None for c in range(1, ws.max_column + 2)):
-                row_number = r
-                break
-
-    # ── 5. Determine starting column ─────────────────────────────────────────
-    if col_number is None:
-        # First column in the target row that is empty
-        col_number = 1
-        for c in range(1, ws.max_column + 2):
-            if ws.cell(row=row_number, column=c).value is None:
-                col_number = c
-                break
-
-    # ── 6. Write values ───────────────────────────────────────────────────────
-    try:
-        for offset, value in enumerate(values):
-            ws.cell(row=row_number, column=col_number + offset, value=value)
-        wb.save(src)
-    except Exception as exc:
-        return _fail(f"Could not write data: {exc}")
-
-    return {
-        "status": "success",
-        "message": (
-            f"Written {len(values)} value(s) starting at "
-            f"row {row_number}, column {col_number}."
-        ),
-        "file_name": str(src),
-        "sheet_name": sheet_name,
-        "row_number": row_number,
-        "col_number": col_number,
-    }
 
 
-def calculate_days_passed(year, month, day):
-    """
-    Calculate the days from today
-    :param year:
-    :param month:
-    :param day:
-    :return:
-    """
-    start_date = datetime.date(year, month, day)  # Create a date object for the start date
-    today = datetime.date.today()  # Get today's date
-    delta = today - start_date  # Subtract the dates to get a timedelta object
-    return delta.days  # Return only the integer number of days
+
+
 
 
 

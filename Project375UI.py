@@ -19,9 +19,10 @@ from photoexperiment import (
     generic_image_request,
     get_photo_details,
     make_square,
-    reveal_in_file_manager
+    reveal_in_file_manager,
+    calculate_days_passed,
+    add_row_to_excel
 )
-from Project365util import add_row_to_excel
 
 # --- Configuration for easy modification (Requirement 2 & 3) ---
 LLM_SERVERS = {
@@ -55,8 +56,10 @@ class PhotoUploadGUI:
         self.selected_server = tk.StringVar(value=list(LLM_SERVERS.keys())[0])
         self.server_ip = tk.StringVar(value=LLM_SERVERS[list(LLM_SERVERS.keys())[0]]["default_ip"])
         self.sheet_name = tk.StringVar(value="Photos")
-        self.row_val = tk.StringVar()
-        self.col_val = tk.StringVar()
+        # the default row is set to the number of days passed since 2026-04-11 plus 2,
+        # which is the starting point for the project
+        self.row_val = tk.StringVar(value=str(calculate_days_passed(2026, 4, 11) + 2))
+        self.col_val = tk.StringVar(value="3")
 
         self._setup_ui()
 
