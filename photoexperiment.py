@@ -119,6 +119,53 @@ def generic_image_request(image_path: str, model: str, prompt_text: str):
         print(f"\n🛑 An unexpected error occurred during API processing: {e}")
         return None
 
+def generic_image_request2(image_path: str, model: str, prompt_text: str, url: str = OLLAMA_API_URL):
+    """
+    Sends an image to a local LLM model via a specified URL.
+    """
+    start_time = time.perf_counter()
+    base64_image = encode_image_to_base64(image_path)
+    if not base64_image:
+        return None
+
+    payload = {
+        "model": model,
+        "prompt": prompt_text,
+        "stream": False,
+        "images": [base64_image],
+        "options": {
+            "temperature": 0.1
+        }
+    }
+
+    try:
+        # CHANGE: Use the 'url' parameter instead of the global OLLAMA_API_URL constant
+        response = requests.post(url, json=payload)
+        response.raise_for_status()
+        # ... (rest of the function remains the same)
+        data = response.json()
+        raw_response = data.get("response", "")
+
+        if not raw_response:
+            print("❌ Error: The model returned an empty response.")
+            return None
+        end_time = time.perf_counter()
+        print(f"The \"thinking\" operation took {end_time - start_time:4f} seconds using {model}.")
+        return raw_response.strip()
+
+    except requests.exceptions.ConnectionError:
+        print("\n🛑 CONNECTION ERROR:")
+        print(f"Could not connect to Ollama. at {url}. Please ensure the Ollama service is running locally.")
+        return None
+    except requests.exceptions.HTTPError as e:
+        print(f"\n🛑 HTTP ERROR: Could not communicate with Ollama at {url}. Status code: {e.response.status_code}")
+        print("Ensure the model specified in the code exists and is pulled locally.")
+        return None
+    except Exception as e:
+        print(f"\n🛑 An unexpected error occurred during API processing: {e}")
+        return None
+
+
 def make_square(path, border_color=(0, 0, 0)):
     """
     Adds borders to images to make them square and saves them as JPEGs.

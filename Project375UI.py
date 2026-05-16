@@ -17,6 +17,7 @@ except ImportError:
 from photoexperiment import (
     check_llm_status,
     generic_image_request,
+    generic_image_request2,
     get_photo_details,
     make_square,
     reveal_in_file_manager,
@@ -231,6 +232,14 @@ class PhotoUploadGUI:
             }
 
             results = {}
+            server_name = self.selected_server.get()
+            ip = self.server_ip.get()
+            port = LLM_SERVERS[server_name]["port"]
+            if server_name == "Ollama":
+                target_url = f"http://{ip}:{port}/api/generate"
+            else:
+                target_url = f"http://{ip}:{port}/v1/chat/completions"
+
             for key, prompt in prompts.items():
                 self.log(f"Requesting {key} from LLM...")
                 # We override the URL in photoexperiment.py's generic_image_request by
@@ -241,7 +250,7 @@ class PhotoUploadGUI:
                 # user updates their local environment/hosts or the utility function
                 # is updated to accept a URL.
                 # FOR NOW, I call the function as is.
-                res = generic_image_request(img_path, model, prompt)
+                res = generic_image_request2(img_path, model, prompt, url=target_url)
                 results[key] = res
                 if res:
                     self.log(f"  -> {key}: {res}")
