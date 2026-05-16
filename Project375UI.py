@@ -56,6 +56,7 @@ class PhotoUploadGUI:
         self.selected_xlsx = tk.StringVar()
         self.selected_server = tk.StringVar(value=list(LLM_SERVERS.keys())[0])
         self.server_ip = tk.StringVar(value=LLM_SERVERS[list(LLM_SERVERS.keys())[0]]["default_ip"])
+        self.server_ip.trace_add("write", lambda *args: self._update_connection_status())
         self.selected_model = tk.StringVar()
         self.sheet_name = tk.StringVar(value="Photos")
         # the default row is set to the number of days passed since 2026-04-11 plus 2,
@@ -169,26 +170,55 @@ class PhotoUploadGUI:
 
 
 
-    def _update_connection_status(self):
-        server_name = self.selected_server.get()
-        ip = self.server_ip.get()
+#    def _update_connection_status(self):
+#        server_name = self.selected_server.get()
+#        ip = self.server_ip.get()
+#
+#        def check():
+#            res = check_llm_status(server_name, ip)
+#            color = "green" if res["online"] else "red"
+#            text = "● Online" if res["online"] else "● Offline"
+#
+#            # Update status label
+#            self.root.after(0, lambda: self.status_label.config(text=text, foreground=color))
+#
+#            # NEW: If online, refresh the model list
+#            if res["online"]:
+#                from photoexperiment import get_available_models  # Ensure it's imported
+#                models = get_available_models(server_name, ip)
+#                if models:
+#                    self.root.after(0, lambda: self._update_model_dropdown(models))
+#
+#        threading.Thread(target=check, daemon=True).start()
 
-        def check():
+    def _update_connection_status(self):
+        # Cancel any previous pending check to avoid spamming threads
+        if hasattr(self, "_status_timer"):
+            self.root.after_cancel(self._status_timer)
+
+        def perform_check():
+            server_name = self.selected_server.get()
+            ip = self.server_ip.get()
+
+            # Only attempt check if the IP is not empty
+            if not ip:
+                return
+
             res = check_llm_status(server_name, ip)
             color = "green" if res["online"] else "red"
             text = "● Online" if res["online"] else "● Offline"
-
-            # Update status label
             self.root.after(0, lambda: self.status_label.config(text=text, foreground=color))
-
-            # NEW: If online, refresh the model list
+            # 2. NEW: If online, fetch models and populate the dropdown
             if res["online"]:
-                from photoexperiment import get_available_models  # Ensure it's imported
+                from photoexperiment import get_available_models
                 models = get_available_models(server_name, ip)
                 if models:
                     self.root.after(0, lambda: self._update_model_dropdown(models))
+                else:
+                    self.log(f"Server online, but no models found on {server_name}.")
 
-        threading.Thread(target=check, daemon=True).start()
+        # Delay the execution by 500ms (Debounce)
+        self._status_timer = self.root.after(500, lambda: threading.Thread(target=perform_check, daemon=True).start())
 
     def _update_model_dropdown(self, models):
         #def check():
