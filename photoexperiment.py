@@ -119,6 +119,34 @@ def check_llm_status(service_type, ip):
 #        print(f"\n🛑 An unexpected error occurred during API processing: {e}")
 #        return None
 
+def get_available_models(server_type, ip):
+    """
+    Fetches the list of available models from the specified LLM server.
+    """
+    port_map = {"ollama": 11434, "lm studio": 1234, "llama.cpp": 8080}
+    port = port_map.get(server_type.lower().strip(), 0)
+    if port == 0: return []
+
+    try:
+        if server_type.lower() == "ollama":
+            # Ollama specific tags endpoint
+            url = f"http://{ip}:{port}/api/tags"
+            response = requests.get(url, timeout=2)
+            if response.status_code == 200:
+                models_data = response.json().get("models", [])
+                return [m.get("name") for m in models_data]
+        else:
+            # OpenAI-compatible endpoint (LM Studio/llama.cpp)
+            url = f"http://{ip}:{port}/v1/models"
+            response = requests.get(url, timeout=2)
+            if response.status_code == 200:
+                models_data = response.json().get("data", [])
+                return [m.get("id") for m in models_data]
+    except Exception as e:
+        print(f"Error fetching models: {e}")
+
+    return []
+
 def generic_image_request(image_path: str, model: str, prompt_text: str, url: str = OLLAMA_API_URL):
     """
     Sends an image to a local LLM model.

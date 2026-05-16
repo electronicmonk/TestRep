@@ -55,6 +55,7 @@ class PhotoUploadGUI:
         self.selected_xlsx = tk.StringVar()
         self.selected_server = tk.StringVar(value=list(LLM_SERVERS.keys())[0])
         self.server_ip = tk.StringVar(value=LLM_SERVERS[list(LLM_SERVERS.keys())[0]]["default_ip"])
+        self.selected_model = tk.StringVar()
         self.sheet_name = tk.StringVar(value="Photos")
         # the default row is set to the number of days passed since 2026-04-11 plus 2,
         # which is the starting point for the project
@@ -69,21 +70,30 @@ class PhotoUploadGUI:
         main_frame.pack(fill=tk.BOTH, expand=True)
 
         # --- LLM Server Section ---
+
         server_frame = ttk.LabelFrame(main_frame, text="LLM Server Settings", padding="10")
         server_frame.pack(fill=tk.X, pady=10)
 
+        # Column 0 & 1: Server Selection
         ttk.Label(server_frame, text="Server:").grid(row=0, column=0, sticky=tk.W)
         self.server_menu = ttk.Combobox(server_frame, textvariable=self.selected_server,
                                         values=list(LLM_SERVERS.keys()), state="readonly")
         self.server_menu.grid(row=0, column=1, padx=5, pady=5)
         self.server_menu.bind("<<ComboboxSelected>>", self._on_server_change)
 
+        # Column 2 & 3: IP Address
         ttk.Label(server_frame, text="IP Address:").grid(row=0, column=2, sticky=tk.W, padx=10)
         self.ip_entry = ttk.Entry(server_frame, textvariable=self.server_ip)
         self.ip_entry.grid(row=0, column=3, padx=5, pady=5)
 
+        # Column 4 & 5: Model Selection (FIXED COLUMNS)
+        ttk.Label(server_frame, text="Model:").grid(row=1, column=0, sticky=tk.W, padx=5)
+        self.model_menu = ttk.Combobox(server_frame, textvariable=self.selected_model, state="readonly")
+        self.model_menu.grid(row=1, column=1, padx=5, pady=5)
+
+        # Column 6: Status Label (FIXED COLUMN from 4 to 6)
         self.status_label = ttk.Label(server_frame, text="Checking status...", foreground="gray")
-        self.status_label.grid(row=0, column=4, padx=10)
+        self.status_label.grid(row=0, column=6, padx=10)
 
         # --- File Selection Section ---
         files_frame = ttk.LabelFrame(main_frame, text="Files (Drag & Drop or Browse)", padding="10")
@@ -151,21 +161,47 @@ class PhotoUploadGUI:
 
     def _on_server_change(self, event):
         server_name = self.selected_server.get()
-        self.server_ip.set(LLM_SERVERS[server_name]["default_ip"])
+        #self.server_ip.set(LLM_SERVERS[server_name]["default_ip"])
         self._update_connection_status()
+
+
 
     def _update_connection_status(self):
         server_name = self.selected_server.get()
         ip = self.server_ip.get()
 
-        # Run check in a small thread to avoid GUI freeze
         def check():
             res = check_llm_status(server_name, ip)
             color = "green" if res["online"] else "red"
             text = "● Online" if res["online"] else "● Offline"
+
+            # Update status label
             self.root.after(0, lambda: self.status_label.config(text=text, foreground=color))
 
+            # NEW: If online, refresh the model list
+            if res["online"]:
+                from photoexperiment import get_available_models  # Ensure it's imported
+                models = get_available_models(server_name, ip)
+                if models:
+                    self.root.after(0, lambda: self._update_model_dropdown(models))
+
         threading.Thread(target=check, daemon=True).start()
+
+    def _update_model_dropdown(self, models):
+        #def check():
+        #    try:
+        #        # Logic to update the combo box values
+        #        self.root.after(0, lambda: self.model_menu.config(values=models))
+        #        self.root.after(0, lambda: self.model_menu.set(models[0] if models else ""))
+        #    except Exception as e:
+        #        print(f"Error updating dropdown: {e}")
+
+        """Helper to update the combobox values and set a default selection."""
+        self.model_menu['values'] = models
+        if not self.selected_model.get() or self.selected_model.get() not in models:
+            self.selected_model.set(models[0])  # Default to first available model
+
+        #threading.Thread(target=check, daemon=True).start()
 
     def log(self, message):
         self.log_area.config(state="normal")
@@ -222,7 +258,13 @@ class PhotoUploadGUI:
             reveal_in_file_manager(img_path)
 
             # LLM Requests
-            model = LLM_SERVERS[server_name]["model"]
+            #model = LLM_SERVERS[server_name]["model"]
+            model = self.selected_model.get()
+            if not model:
+                self.log("FAIL: No LLM model selected.")
+                self.root.after(0, lambda: messagebox.showerror("Error", "Please select a model from the list."))
+                self.root.after(0, lambda: self.start_btn.config(state="normal"))
+                return
 
             prompts = {
                 "Genre": "You are an expert photography critic and genre classifier. Analyze the provided image and determine the primary genre of photography. Your output must be concise and contain only the name of the genre. No preamble.",
