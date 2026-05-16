@@ -62,7 +62,8 @@ class PhotoUploadGUI:
         self.col_val = tk.StringVar(value="3")
 
         self._setup_ui()
-
+        # This tells Tkinter to run _update_connection_status whenever 'server_ip' is written to (changed)
+        self.server_ip.trace_add("write", lambda *args: self._update_connection_status())
     def _setup_ui(self):
         main_frame = ttk.Frame(self.root, padding="20")
         main_frame.pack(fill=tk.BOTH, expand=True)
