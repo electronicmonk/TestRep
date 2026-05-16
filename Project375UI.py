@@ -49,6 +49,7 @@ class PhotoUploadGUI:
         self.root = root
         self.root.title("Project 365 - Photo Uploader")
         self.root.geometry("700x850")
+        self.stop_requested = False
 
         # Variables
         self.selected_image = tk.StringVar()
@@ -129,6 +130,8 @@ class PhotoUploadGUI:
         # --- Control Button ---
         self.start_btn = ttk.Button(main_frame, text="START UPLOAD PROCESS", command=self._start_thread)
         self.start_btn.pack(pady=20)
+        self.stop_btn = ttk.Button(main_frame, text="STOP PROCESS", command=self._request_stop, state="disabled")
+        self.stop_btn.pack(pady=5)
 
         # --- Output Log ---
         ttk.Label(main_frame, text="Process Log:").pack(anchor=tk.W)
@@ -215,8 +218,16 @@ class PhotoUploadGUI:
             messagebox.showerror("Error", "Please select both image and excel files.")
             return
 
+        self.stop_requested = False
         self.start_btn.config(state="disabled")
+        self.stop_btn.config(state="normal")  # Enable Stop button
         threading.Thread(target=self._run_process, daemon=True).start()
+
+    def _request_stop(self):
+        """Triggered by the stop button; asks for confirmation before signaling the thread."""
+        if messagebox.askyesno("Confirm Stop", "Are you sure you want to stop the process?"):
+            self.log("🛑 Stop requested by user. Finishing current step and exiting...")
+            self.stop_requested = True
 
     def _run_process(self):
         start_time = time.perf_counter()
@@ -246,6 +257,9 @@ class PhotoUploadGUI:
                 return
 
             # 2. Image Processing (The "what full_upload_process_output does" part)
+            if self.stop_requested:
+                self.log("Process stopped by user.")
+                return
             self.log("Starting upload process...")
 
             # EXIF Data
@@ -283,6 +297,9 @@ class PhotoUploadGUI:
                 target_url = f"http://{ip}:{port}/v1/chat/completions"
 
             for key, prompt in prompts.items():
+                if self.stop_requested:
+                    self.log("Process stopped by user during LLM requests.")
+                    return
                 self.log(f"Requesting {key} from LLM...")
                 # We override the URL in photoexperiment.py's generic_image_request by
                 # dynamically updating the globals if needed, but since generic_image_request
@@ -324,7 +341,9 @@ class PhotoUploadGUI:
                 values_list.extend(keywords_list)
             else:
                 values_list.append(" ")
-
+            if self.stop_requested:
+                self.log("Process stopped by user before writing to Excel.")
+                return
             # 4. Write to Excel
             self.log("Updating XLSX file...")
             excel_res = add_row_to_excel(
@@ -357,7 +376,7 @@ class PhotoUploadGUI:
             end_time = time.perf_counter()
             self.log(f"Total process time: {end_time - start_time:.2f} seconds")
             self.root.after(0, lambda: self.start_btn.config(state="normal"))
-
+            self.root.after(0, lambda: self.stop_btn.config(state="disabled"))
 
 if __name__ == "__main__":
     # Use TkinterDnD if available, otherwise standard Tk
